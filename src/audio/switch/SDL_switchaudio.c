@@ -87,15 +87,17 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
 
     //printf("audio: freq: %i, channels: %i, samples: %i\n", this->spec.freq, this->spec.channels, this->spec.samples);
 
-    u32 size = (u32) (this->spec.size + 0xfff) & ~0xfff;
+    u32 size = (u32) ((this->spec.size * 2) + 0xfff) & ~0xfff;
     this->hidden->pool = memalign(0x1000, size);
-    this->hidden->buffer.data_raw = this->hidden->pool;
-    this->hidden->buffer.size = this->spec.size;
-    this->hidden->buffer.start_sample_offset = 0;
-    this->hidden->buffer.end_sample_offset = this->spec.samples;
-    this->hidden->buffer_tmp = malloc(this->spec.size);
+    for (int i = 0; i < 2; i++) {
+        this->hidden->buffer[i].data_raw = this->hidden->pool;
+        this->hidden->buffer[i].size = this->spec.size * 2;
+        this->hidden->buffer[i].start_sample_offset = i * this->spec.samples;
+        this->hidden->buffer[i].end_sample_offset = this->hidden->buffer[i].start_sample_offset + this->spec.samples;
+        this->hidden->buffer_tmp = malloc(this->spec.size);
+    }
 
-    int mpid = audrvMemPoolAdd(&this->hidden->driver, this->hidden->pool, this->hidden->buffer.size);
+    int mpid = audrvMemPoolAdd(&this->hidden->driver, this->hidden->pool, size);
     audrvMemPoolAttach(&this->hidden->driver, mpid);
 
     static const u8 sink_channels[] = {0, 1};
@@ -127,18 +129,33 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
 static void
 SWITCHAUDIO_PlayDevice(_THIS)
 {
+    int current = -1;
+    for (int i = 0; i < 2; i++) {
+        if (this->hidden->buffer[i].state == AudioDriverWaveBufState_Free
+            || this->hidden->buffer[i].state == AudioDriverWaveBufState_Done) {
+            current = i;
+            break;
+        }
+    }
 
-    memcpy(this->hidden->pool, this->hidden->buffer_tmp, this->hidden->buffer.size);
-    armDCacheFlush(this->hidden->pool, this->hidden->buffer.size);
-    audrvVoiceAddWaveBuf(&this->hidden->driver, 0, &this->hidden->buffer);
-    if (!audrvVoiceIsPlaying(&this->hidden->driver, 0))
-        audrvVoiceStart(&this->hidden->driver, 0);
+    if (current >= 0) {
+        Uint16 *ptr = (Uint16 *) (this->hidden->pool + this->hidden->buffer[current].start_sample_offset);
+        memcpy(ptr, this->hidden->buffer_tmp, this->hidden->buffer[current].size);
+        armDCacheFlush(ptr, this->hidden->buffer[current].size);
+        this->hidden->buffer[current].end_sample_offset =
+            this->hidden->buffer[current].start_sample_offset + this->spec.samples;
+        audrvVoiceAddWaveBuf(&this->hidden->driver, 0, &this->hidden->buffer[current]);
+    }
+    else {
+        if (!audrvVoiceIsPlaying(&this->hidden->driver, 0)) {
+            audrvVoiceStart(&this->hidden->driver, 0);
+        }
+    }
 }
 
 static void
 SWITCHAUDIO_WaitDevice(_THIS)
 {
-
     Result res = audrvUpdate(&this->hidden->driver);
     if (R_FAILED(res)) {
         printf("audrvUpdate: %" PRIx32 "\n", res);
@@ -147,13 +164,23 @@ SWITCHAUDIO_WaitDevice(_THIS)
         audrenWaitFrame();
     }
 
-    while (this->hidden->buffer.state == AudioDriverWaveBufState_Playing) {
-        res = audrvUpdate(&this->hidden->driver);
-        if (R_FAILED(res)) {
-            printf("audrvUpdate: %" PRIx32 "\n", res);
+    int current = -1;
+    for (int i = 0; i < 2; i++) {
+        if (this->hidden->buffer[i].state == AudioDriverWaveBufState_Playing) {
+            current = i;
+            break;
         }
-        else {
-            audrenWaitFrame();
+    }
+
+    if (current >= 0) {
+        while (this->hidden->buffer[current].state == AudioDriverWaveBufState_Playing) {
+            res = audrvUpdate(&this->hidden->driver);
+            if (R_FAILED(res)) {
+                printf("audrvUpdate: %" PRIx32 "\n", res);
+            }
+            else {
+                audrenWaitFrame();
+            }
         }
     }
     //printf("sample count = %" PRIu32 "\n", audrvVoiceGetPlayedSampleCount(&this->hidden->driver, 0));
@@ -162,7 +189,6 @@ SWITCHAUDIO_WaitDevice(_THIS)
 static Uint8
 *SWITCHAUDIO_GetDeviceBuf(_THIS)
 {
-
     return this->hidden->buffer_tmp;
 }
 

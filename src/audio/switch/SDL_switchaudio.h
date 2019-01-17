@@ -31,7 +31,7 @@
 struct SDL_PrivateAudioData
 {
     AudioDriver driver;
-    AudioDriverWaveBuf buffer;
+    AudioDriverWaveBuf buffer[2];
     void *buffer_tmp;
     void *pool;
     bool audr_device;
