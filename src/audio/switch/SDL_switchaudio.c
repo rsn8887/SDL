@@ -71,7 +71,10 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
 
     test_format = SDL_FirstAudioFormat(this->spec.format);
     while ((!supported_format) && (test_format)) {
-        if (test_format == AUDIO_S16LSB) {
+        if (test_format == AUDIO_S8
+            || test_format == AUDIO_S16SYS
+            || test_format == AUDIO_S32SYS
+            || test_format == AUDIO_F32SYS) {
             supported_format = SDL_TRUE;
         }
         else {
@@ -84,8 +87,6 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
 
     this->spec.format = test_format;
     SDL_CalculateAudioSpec(&this->spec);
-
-    //printf("audio: freq: %i, channels: %i, samples: %i\n", this->spec.freq, this->spec.channels, this->spec.samples);
 
     u32 size = (u32) ((this->spec.size * 2) + 0xfff) & ~0xfff;
     this->hidden->pool = memalign(0x1000, size);
@@ -108,7 +109,17 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
         return SDL_SetError("audrenStartAudioRenderer failed (0x%x)", res);
     }
 
-    audrvVoiceInit(&this->hidden->driver, 0, this->spec.channels, PcmFormat_Int16, this->spec.freq);
+    PcmFormat fmt = PcmFormat_Int16;
+    if (this->spec.format == AUDIO_S8) {
+        fmt = PcmFormat_Int8;
+    }
+    else if (this->spec.format == AUDIO_S32SYS) {
+        fmt = PcmFormat_Int32;
+    }
+    else if (this->spec.format == AUDIO_F32SYS) {
+        fmt = PcmFormat_Float;
+    }
+    audrvVoiceInit(&this->hidden->driver, 0, this->spec.channels, fmt, this->spec.freq);
     audrvVoiceSetDestinationMix(&this->hidden->driver, 0, AUDREN_FINAL_MIX_ID);
     if (this->spec.channels == 1) {
         audrvVoiceSetMixFactor(&this->hidden->driver, 0, 1.0f, 0, 0);
@@ -139,16 +150,34 @@ SWITCHAUDIO_PlayDevice(_THIS)
     }
 
     if (current >= 0) {
-        Uint16 *ptr = (Uint16 *) (this->hidden->pool + this->hidden->buffer[current].start_sample_offset);
-        memcpy(ptr, this->hidden->buffer_tmp, this->hidden->buffer[current].size);
-        armDCacheFlush(ptr, this->hidden->buffer[current].size);
-        this->hidden->buffer[current].end_sample_offset =
-            this->hidden->buffer[current].start_sample_offset + this->spec.samples;
+        Uint8 *ptr = (Uint8 *) (this->hidden->pool + (current * this->spec.size));
+        memcpy(ptr, this->hidden->buffer_tmp, this->spec.size);
+        armDCacheFlush(ptr, this->spec.size);
         audrvVoiceAddWaveBuf(&this->hidden->driver, 0, &this->hidden->buffer[current]);
     }
+    else if (!audrvVoiceIsPlaying(&this->hidden->driver, 0)) {
+        audrvVoiceStart(&this->hidden->driver, 0);
+    }
+
+    audrvUpdate(&this->hidden->driver);
+
+    if (current >= 0) {
+        while (this->hidden->buffer[current].state != AudioDriverWaveBufState_Playing) {
+            audrvUpdate(&this->hidden->driver);
+            audrenWaitFrame();
+        }
+    }
     else {
-        if (!audrvVoiceIsPlaying(&this->hidden->driver, 0)) {
-            audrvVoiceStart(&this->hidden->driver, 0);
+        current = -1;
+        for (int i = 0; i < 2; i++) {
+            if (this->hidden->buffer[i].state == AudioDriverWaveBufState_Playing) {
+                current = i;
+                break;
+            }
+        }
+        while (this->hidden->buffer[current].state == AudioDriverWaveBufState_Playing) {
+            audrvUpdate(&this->hidden->driver);
+            audrenWaitFrame();
         }
     }
 }
@@ -156,34 +185,6 @@ SWITCHAUDIO_PlayDevice(_THIS)
 static void
 SWITCHAUDIO_WaitDevice(_THIS)
 {
-    Result res = audrvUpdate(&this->hidden->driver);
-    if (R_FAILED(res)) {
-        printf("audrvUpdate: %" PRIx32 "\n", res);
-    }
-    else {
-        audrenWaitFrame();
-    }
-
-    int current = -1;
-    for (int i = 0; i < 2; i++) {
-        if (this->hidden->buffer[i].state == AudioDriverWaveBufState_Playing) {
-            current = i;
-            break;
-        }
-    }
-
-    if (current >= 0) {
-        while (this->hidden->buffer[current].state == AudioDriverWaveBufState_Playing) {
-            res = audrvUpdate(&this->hidden->driver);
-            if (R_FAILED(res)) {
-                printf("audrvUpdate: %" PRIx32 "\n", res);
-            }
-            else {
-                audrenWaitFrame();
-            }
-        }
-    }
-    //printf("sample count = %" PRIu32 "\n", audrvVoiceGetPlayedSampleCount(&this->hidden->driver, 0));
 }
 
 static Uint8
