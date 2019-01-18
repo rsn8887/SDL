@@ -46,10 +46,12 @@ static const AudioRendererConfig arConfig =
 static int
 SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
 {
-
-    Result res;
+    static const u8 sink_channels[] = {0, 1};
     SDL_bool supported_format = SDL_FALSE;
     SDL_AudioFormat test_format;
+    Result res;
+    u32 size;
+    int mpid;
 
     this->hidden = (struct SDL_PrivateAudioData *) SDL_malloc(sizeof(*this->hidden));
     if (this->hidden == NULL) {
@@ -71,10 +73,7 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
 
     test_format = SDL_FirstAudioFormat(this->spec.format);
     while ((!supported_format) && (test_format)) {
-        if (test_format == AUDIO_S8
-            || test_format == AUDIO_S16SYS
-            || test_format == AUDIO_S32SYS
-            || test_format == AUDIO_F32SYS) {
+        if (test_format == AUDIO_S16SYS) {
             supported_format = SDL_TRUE;
         }
         else {
@@ -88,7 +87,7 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
     this->spec.format = test_format;
     SDL_CalculateAudioSpec(&this->spec);
 
-    u32 size = (u32) ((this->spec.size * 2) + 0xfff) & ~0xfff;
+    size = (u32) ((this->spec.size * 2) + 0xfff) & ~0xfff;
     this->hidden->pool = memalign(0x1000, size);
     for (int i = 0; i < 2; i++) {
         this->hidden->buffer[i].data_raw = this->hidden->pool;
@@ -98,10 +97,9 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
         this->hidden->buffer_tmp = malloc(this->spec.size);
     }
 
-    int mpid = audrvMemPoolAdd(&this->hidden->driver, this->hidden->pool, size);
+    mpid = audrvMemPoolAdd(&this->hidden->driver, this->hidden->pool, size);
     audrvMemPoolAttach(&this->hidden->driver, mpid);
 
-    static const u8 sink_channels[] = {0, 1};
     audrvDeviceSinkAdd(&this->hidden->driver, AUDREN_DEFAULT_DEVICE_NAME, 2, sink_channels);
 
     res = audrenStartAudioRenderer();
@@ -109,17 +107,7 @@ SWITCHAUDIO_OpenDevice(_THIS, void *handle, const char *devname, int iscapture)
         return SDL_SetError("audrenStartAudioRenderer failed (0x%x)", res);
     }
 
-    PcmFormat fmt = PcmFormat_Int16;
-    if (this->spec.format == AUDIO_S8) {
-        fmt = PcmFormat_Int8;
-    }
-    else if (this->spec.format == AUDIO_S32SYS) {
-        fmt = PcmFormat_Int32;
-    }
-    else if (this->spec.format == AUDIO_F32SYS) {
-        fmt = PcmFormat_Float;
-    }
-    audrvVoiceInit(&this->hidden->driver, 0, this->spec.channels, fmt, this->spec.freq);
+    audrvVoiceInit(&this->hidden->driver, 0, this->spec.channels, PcmFormat_Int16, this->spec.freq);
     audrvVoiceSetDestinationMix(&this->hidden->driver, 0, AUDREN_FINAL_MIX_ID);
     if (this->spec.channels == 1) {
         audrvVoiceSetMixFactor(&this->hidden->driver, 0, 1.0f, 0, 0);
