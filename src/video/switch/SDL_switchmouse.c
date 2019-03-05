@@ -50,6 +50,7 @@ SWITCH_PollMouse(void)
 	MousePosition mouse_pos;
 	uint64_t timestamp;
 	int dx, dy;
+	int wheel_dx, wheel_dy;
 
 	// We skip polling mouse if no window is created
 	if (window == NULL)
@@ -91,6 +92,13 @@ SWITCH_PollMouse(void)
 		if (dx || dy) {
 			SDL_SendMouseMotion(window, 0, 1, dx, dy);
 		}
+
+		wheel_dx = mouse_pos.scrollVelocityX;
+		wheel_dy = mouse_pos.scrollVelocityY;
+		if (wheel_dx || wheel_dy) {
+			SDL_SendMouseWheel(window, 0, (float) wheel_dx, (float) wheel_dy, SDL_MOUSEWHEEL_NORMAL);
+		}
+
 		last_timestamp = timestamp;
 	}
 }
