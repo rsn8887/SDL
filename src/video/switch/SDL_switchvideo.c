@@ -183,10 +183,16 @@ SWITCH_GetDisplayModes(_THIS, SDL_VideoDisplay *display)
 int
 SWITCH_SetDisplayMode(_THIS, SDL_VideoDisplay *display, SDL_DisplayMode *mode)
 {
+    SDL_WindowData *data = (SDL_WindowData *) SDL_GetFocusWindow()->driverdata;
+    SDL_GLContext ctx = SDL_GL_GetCurrentContext();
     NWindow *nWindow = nwindowGetDefault();
-    Result rc = nwindowSetDimensions(nWindow, mode->w, mode->h);
-    if (rc) {
-        return SDL_SetError("Could not set NWindow crop: 0x%x", rc);
+
+    if (data != NULL && data->egl_surface != EGL_NO_SURFACE) {
+        SDL_EGL_MakeCurrent(_this, NULL, NULL);
+        SDL_EGL_DestroySurface(_this, data->egl_surface);
+        nwindowSetDimensions(nWindow, mode->w, mode->h);
+        data->egl_surface = SDL_EGL_CreateSurface(_this, nWindow);
+        SDL_EGL_MakeCurrent(_this, data->egl_surface, ctx);
     }
 
     return 0;
@@ -244,6 +250,7 @@ SWITCH_DestroyWindow(_THIS, SDL_Window *window)
     if (window == switch_window) {
         if (data != NULL) {
             if (data->egl_surface != EGL_NO_SURFACE) {
+                SDL_EGL_MakeCurrent(_this, NULL, NULL);
                 SDL_EGL_DestroySurface(_this, data->egl_surface);
             }
             if(window->driverdata != NULL) {
@@ -275,8 +282,20 @@ SWITCH_SetWindowPosition(_THIS, SDL_Window *window)
 void
 SWITCH_SetWindowSize(_THIS, SDL_Window *window)
 {
+    u32 w = 0, h = 0;
+    SDL_WindowData *data = (SDL_WindowData *) window->driverdata;
+    SDL_GLContext ctx = SDL_GL_GetCurrentContext();
     NWindow *nWindow = nwindowGetDefault();
-    nwindowSetDimensions(nWindow, window->w, window->h);
+
+    if(window->w != w || window->h != h) {
+        if (data != NULL && data->egl_surface != EGL_NO_SURFACE) {
+            SDL_EGL_MakeCurrent(_this, NULL, NULL);
+            SDL_EGL_DestroySurface(_this, data->egl_surface);
+            nwindowSetDimensions(nWindow, window->w, window->h);
+            data->egl_surface = SDL_EGL_CreateSurface(_this, nWindow);
+            SDL_EGL_MakeCurrent(_this, data->egl_surface, ctx);
+        }
+    }
 }
 void
 SWITCH_ShowWindow(_THIS, SDL_Window *window)
