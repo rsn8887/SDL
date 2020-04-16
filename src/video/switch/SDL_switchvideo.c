@@ -103,7 +103,6 @@ SWITCH_CreateDevice(int devindex)
     device->GL_SwapWindow = SWITCH_GLES_SwapWindow;
     device->GL_DeleteContext = SWITCH_GLES_DeleteContext;
     device->GL_DefaultProfileConfig = SWITCH_GLES_DefaultProfileConfig;
-    device->GL_GetDrawableSize = SWITCH_GLES_GetDrawableSize;
 
     device->PumpEvents = SWITCH_PumpEvents;
 
@@ -185,7 +184,7 @@ int
 SWITCH_SetDisplayMode(_THIS, SDL_VideoDisplay *display, SDL_DisplayMode *mode)
 {
     NWindow *nWindow = nwindowGetDefault();
-    Result rc = nwindowSetCrop(nWindow, 0, 0, mode->w, mode->h);
+    Result rc = nwindowSetDimensions(nWindow, mode->w, mode->h);
     if (rc) {
         return SDL_SetError("Could not set NWindow crop: 0x%x", rc);
     }
@@ -215,14 +214,9 @@ SWITCH_CreateWindow(_THIS, SDL_Window *window)
 
     nWindow = nwindowGetDefault();
 
-    rc = nwindowSetDimensions(nWindow, 1920, 1080);
+    rc = nwindowSetDimensions(nWindow, window->w, window->h);
     if (R_FAILED(rc)) {
         return SDL_SetError("Could not set NWindow dimensions: 0x%x", rc);
-    }
-
-    rc = nwindowSetCrop(nWindow, 0, 0, window->w, window->h);
-    if (R_FAILED(rc)) {
-        return SDL_SetError("Could not set NWindow crop: 0x%x", rc);
     }
 
     window_data->egl_surface = SDL_EGL_CreateSurface(_this, nWindow);
@@ -282,7 +276,7 @@ void
 SWITCH_SetWindowSize(_THIS, SDL_Window *window)
 {
     NWindow *nWindow = nwindowGetDefault();
-    nwindowSetCrop(nWindow, 0, 0, window->w, window->h);
+    nwindowSetDimensions(nWindow, window->w, window->h);
 }
 void
 SWITCH_ShowWindow(_THIS, SDL_Window *window)
